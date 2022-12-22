@@ -1,0 +1,170 @@
+---
+title: "Análisis Bioestadístico - Crecimiento de plantas in vitro"
+author: "Alex Alvarez"
+date: "2022-11-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+pacman::p_load(tidyverse, corrplot, patchwork, hrbrthemes, ggpubr)
+setwd('C:/Users/ALEX/OneDrive_main/UAI/CL/S2/Bioest/Bio_in_vitro')
+db <- read_delim("Lab_veg.csv", delim = "\t", 
+    escape_double = FALSE, trim_ws = TRUE)
+summary(db)
+glimpse(db)
+```
+> Se observan 108 datos y la presencia de valores ausentes (NA). Tales observaciones no ayudarán al análisis, por lo que se decide quitarlos del set de datos.
+
+Se quitan los valores ausentes
+```{r}
+db <- db%>% drop_na()
+summary(db)
+glimpse(db)
+```
+
+> El resultado es 69 observaciones sin valores ausentes.
+
+Evaluación visual usando boxlpots
+
+```{r}
+p1 <- ggboxplot(db, x = "Factor", y = "Area_foliar", notch = T,
+          color = "Factor", palette = c("#00AFBB", "#E7B800", "#FC4E07", "#00AF00"),
+          ylab = "Area_foliar", xlab = "Treatment")
+
+p2 <- ggboxplot(db, x = "Factor", y = "Largo_raiz",  notch = T,
+          color = "Factor", palette = c("#00AFBB", "#E7B800", "#FC4E07", "#00AF00"),
+          ylab = "Largo_raiz", xlab = "Treatment")
+p1
+p2
+
+```
+
+
+> Se observa que el área foliar es sensible a los distintos tratamientos al visualizarlos respecto al control, sin embargo, los subgrupos parecen tener dispersiones muy distintas respecto al tratamiento de control. Por otro lado, el largo de la raiz presenta diferencias significativas según el tratamiento, en este caso, el largo de la raiz es menor en las plantas tratadas con NPA y bacteria+NPA.
+
+Se verifica la existencia de relación lineal entre área foliar y largo de la raiz
+```{r}
+lm1 <- lm(Area_foliar ~ Largo_raiz, data = db)
+summary(lm1)
+
+cor.test(db$Area_foliar, db$Largo_raiz, 
+                    method = "pearson")
+
+ggplot(db, aes(x=Largo_raiz, y=Area_foliar)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="#69b3a2", se=TRUE) +
+  theme_ipsum()
+
+```
+
+> Se puede observar que existe una correlación lineal de -0.26 entre área foliar y largo de la raiz, aunque el R cuadrado del ajuste lineal asociado es relativamente bajo (0.0542).
+
+
+Se aplica Bartlett test para ver si las varianzas de los subgrupos de datos (factores) son homogéneas.
+
+```{r}
+bartlett.test(Area_foliar ~ Factor, data = db)
+
+bartlett.test(Largo_raiz ~ Factor, data = db)
+```
+
+> La varianza de los subgrupos está lejos de ser homogénea, son significativamente distintas tanto para área foliar como largo de la raiz, por lo que no se cumple un supuesto importante para la fiablilidad de un ANOVA o ANCOVA.
+
+
+Análisis de varianza y covarianza (ANOVA y ANCOVA) para área foliar
+
+```{r}
+AF_anova <- aov(Area_foliar ~ Factor, data = db)
+summary(AF_anova)
+
+AF_ancova <- aov(Area_foliar ~ Factor*Largo_raiz, data = db)
+summary(AF_ancova)
+```
+
+> El tipo de tratamiento sí es significativo para las medias del área foliar pero, el largo de la raíz es no es una covariable significativa, luego, tampoco lo es efecto combinado de ambos. 
+Se observa un nivel de significancia muy similar respecto a utilizar ANOVA de un factor y el ANCOVA con covariable largo de la raiz. 
+
+Análisis de varianza y covarianza (ANOVA y ANCOVA) para largo de la raiz
+
+```{r}
+LR_anova <- aov(Largo_raiz ~ Factor, data = db)
+summary(LR_anova)
+
+LR_ancova <- aov(Largo_raiz ~ Factor*Area_foliar, data = db)
+summary(LR_ancova)
+```
+
+> El tipo de tratamiento sí es significativo para las medias del largo de la raiz, pero el area foliar es no es una covariable significativa, luego, tampoco lo es efecto combinado de ambos. 
+Se observa un nivel de significancia muy similar respecto a utilizar ANOVA de un factor y el ANCOVA con covariable area foliar, aunque el estadístico F empeora levemente al incorporar la covariable.
+
+Comparación ANOVA - ANCOVA:
+Se evalúa si existen diferencias significativas entre ANOVA y ANCOVA y luego se elegirá el mejor análisis por criterio de información Akaike tanto para explicar área foliar y como largo de la raiz
+```{r}
+anova(AF_anova,AF_ancova)
+AIC(AF_anova,AF_ancova)
+
+anova(LR_anova,LR_ancova)
+AIC(LR_anova,LR_ancova)
+```
+
+> No existe diferencia significativa entre incorporar o no la covariable al análisis, tanto largo de la raiz como para área foliar. Luego por criterio de información Akaike, para ambos casos obtuvo mejor desempeño el ANOVA respecto al ANCOVA, por lo que se descarta el ANCOVA para el resto del análisis.
+
+Análisis visual de los residuos del modelo y análisis de normalidad de los residuos con test de Shapiro-Wilk para el área foliar
+```{r}
+shapiro.test(AF_anova$residuals)
+plot(AF_anova)
+```
+
+
+Análisis visual de los residuos del modelo y análisis de normalidad de los residuos con test de Shapiro-Wilk para el largo de la raiz
+```{r}
+shapiro.test(LR_anova$residuals)
+plot(LR_ancova)
+```
+
+> Los residuos de los subgrupos NO parecen provenir de una distribución normal para largo de la raiz, por lo que hay dos supuestos que no se cumplen para un correcto ANOVA o ANCOVA.
+
+Se utilizará el test no paramétrico Kruskal-Wallis ya que el tamaño de la muestra es mayor a 20 y los datos no son pareados.
+Kruskal para área foliar
+```{r}
+AF_kw <- kruskal.test(Area_foliar ~ Factor, data = db)
+AF_kw
+summary(AF_anova)
+```
+> El tratamiento sí produce grupos significativamente distintos respecto a su área foliar (no provienen de una misma distribución)
+
+Kruskal para largo de la raiz
+```{r}
+LR_kw <- kruskal.test(Largo_raiz ~ Factor, data = db)
+LR_kw
+summary(LR_anova)
+
+```
+> El tratamiento sí produce grupos significativamente distintos respecto a su largo de la raiz (no provienen de una misma distribución)
+
+
+Test post-hoc para analizar en qué grupos están las diferencias significativas.
+
+Diferencias entre grupos para área foliar y largo de la raiz (no paramétrico) con pairwise.wilcox.test
+```{r}
+pairwise.wilcox.test(db$Area_foliar, db$Factor,
+                     p.adjust.method = "bonf")
+
+pairwise.wilcox.test(db$Largo_raiz, db$Factor,
+                     p.adjust.method = "bonf")
+p1
+p2
+```
+
+
+> Para área foliar: Solo existe diferencias entre los tres tratamientos y el control. Las diferencias entre los tres tratamientos no son significativas. Cabe destacar, como se aprecia en los boxplots iniciales, que los tres tratamientos fomentan el crecimiento del área foliar
+> Para largo de la raiz: Existe diferencia significativa entre todos los pares excepto Control x Bacteria y NPA x Bacteria_NPA. Cabe destacar  que ningún tratamiento supera al control significativamente para el largo de la raiz.
+
+
+
